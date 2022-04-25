@@ -87,11 +87,13 @@ def detect(msg, save_img=False):
     ### === ####
     imgs = [None] * 1
     imgs[0] = bridge.imgmsg_to_cv2(msg, 'bgr8')
-    s = np.stack([letterbox(x, new_shape=imgsz)[0].shape for x in imgs], 0)
-    rect = np.unique(s, axis=0).shape[0] == 1
-    img0 = bridge.imgmsg_to_cv2(msg, 'bgr8')
+    imgs[0] = np.array(imgs[0], dtype=np.uint8)
+    rect = True
+    img0 = imgs.copy()
+    #print(img0) 
     # letterbox
     img = [letterbox(x, new_shape=imgsz, auto=rect)[0] for x in img0]
+    #print(img)
     # stack
     img = np.stack(img, 0)
     #convert
@@ -127,7 +129,7 @@ def detect(msg, save_img=False):
             p, s, im0 = 'zed', '', im0s
 
         save_path = str(Path(out) / Path(p).name)
-        txt_path = str(Path(out) / Path(p).stem) + ('_%g' % dataset.frame if dataset.mode == 'video' else '')
+        #txt_path = str(Path(out) / Path(p).stem) + ('_%g' % dataset.frame if dataset.mode == 'video' else '')
         s += '%gx%g ' % img.shape[2:]  # print string
         gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
         if det is not None and len(det):
@@ -135,16 +137,16 @@ def detect(msg, save_img=False):
             det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
 
             # Print results
-            for c in det[:, -1].unique():
-                n = (det[:, -1] == c).sum()  # detections per class
-                s += '%g %ss, ' % (n, names[int(c)])  # add to string
+            # for c in det[:, -1].unique():
+            #     n = (det[:, -1] == c).sum()  # detections per class
+            #     s += '%g %ss, ' % (n, names[int(c)])  # add to string
 
             # Write results
             for *xyxy, conf, cls in det:
-                if save_txt:  # Write to file
-                    xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                    with open(txt_path + '.txt', 'a') as f:
-                        f.write(('%g ' * 5 + '\n') % (cls, *xywh))  # label format
+                # if save_txt:  # Write to file
+                #     xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+                #     with open(txt_path + '.txt', 'a') as f:
+                #         f.write(('%g ' * 5 + '\n') % (cls, *xywh))  # label format
 
                 if save_img or view_img:  # Add bbox to image
                     label = '%s %.2f' % (names[int(cls)], conf)
@@ -162,17 +164,19 @@ def detect(msg, save_img=False):
     print('Done. (%.3fs)' % (time.time() - t0))
 
 def check_output(msg):
+    print('begin')
     frame = bridge.imgmsg_to_cv2(msg, "bgr8")
     frame = np.array(frame, dtype=np.uint8)
     cv2.imshow('zed', frame)
+    print('end')
     if cv2.waitKey(1) == ord('q'):  # q to quit
         raise StopIteration
 
 def listener():
     rospy.init_node('yolor', anonymous=True)
 
-    topic = '/zed2i/zed_node/right_raw/image_raw_color'
-    #topic = '/zed2i/zed_node/stereo/image_rect_color'
+    #topic = '/zed2i/zed_node/right_raw/image_raw_color'
+    topic = '/zed2i/zed_node/stereo/image_rect_color'
 
     rospy.Subscriber(topic, Image, detect)
 
