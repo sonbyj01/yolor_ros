@@ -63,14 +63,17 @@ def detect(msg, save_img=False):
         modelc.to(device).eval()
 
     # Set Dataloader
-    vid_path, vid_writer = None, None
-    if webcam:
-        view_img = True
-        cudnn.benchmark = True  # set True to speed up constant image size inference
-        dataset = LoadStreams(source, img_size=imgsz)
-    else:
-        save_img = True
-        dataset = LoadImages(source, img_size=imgsz, auto_size=64)
+    # vid_path, vid_writer = None, None
+    # if webcam:
+    #     view_img = True
+    #     cudnn.benchmark = True  # set True to speed up constant image size inference
+    #     dataset = LoadStreams(source, img_size=imgsz)
+    # else:
+    #     save_img = True
+    #     dataset = LoadImages(source, img_size=imgsz, auto_size=64)
+
+    view_img = True
+    cudnn.benchmark = True
 
     # Get names and colors
     names = load_classes(names)
@@ -84,18 +87,18 @@ def detect(msg, save_img=False):
     ### === ####
     imgs = [None] * 1
     imgs[0] = bridge.imgmsg_to_cv2(msg, 'bgr8')
-    s = np.shape([letterbox(x, new_shape=imgsz)[0].shape for x in imgs], 0)
+    s = np.stack([letterbox(x, new_shape=imgsz)[0].shape for x in imgs], 0)
     rect = np.unique(s, axis=0).shape[0] == 1
     img0 = bridge.imgmsg_to_cv2(msg, 'bgr8')
     # letterbox
     img = [letterbox(x, new_shape=imgsz, auto=rect)[0] for x in img0]
     # stack
-    img = np.stack[img, 0]
+    img = np.stack(img, 0)
     #convert
     img = img[:, :, :, ::-1].transpose(0, 3, 1, 2)  # BGR to RGB, to bsx3x416x416
     img = np.ascontiguousarray(img)
     
-    im0s = img0
+    im0s = img0.copy()
 
     # no more for loop iterator
     img = torch.from_numpy(img).to(device)
@@ -168,7 +171,10 @@ def check_output(msg):
 def listener():
     rospy.init_node('yolor', anonymous=True)
 
-    rospy.Subscriber('/zed2i/zed_node/right_raw/image_raw_color', Image, check_output)
+    topic = '/zed2i/zed_node/right_raw/image_raw_color'
+    #topic = '/zed2i/zed_node/stereo/image_rect_color'
+
+    rospy.Subscriber(topic, Image, detect)
 
     rospy.spin()
 
