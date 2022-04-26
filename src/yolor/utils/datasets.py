@@ -34,6 +34,13 @@ import rospy
 from sensor_msgs.msg import Image
 from std_msgs.msg import String
 
+from utils.plots import plot_one_box
+from utils.torch_utils import select_device, load_classifier, time_synchronized
+
+from models.models import *
+from utils.datasets import *
+from utils.general import *
+
 # exit params
 # https://github.com/tobybreckon/zed-opencv-native-python/blob/master/camera_stream.py
 exitingNow = False
@@ -309,12 +316,44 @@ class LoadWebcam:  # for inference
 bridge = CvBridge()
 # https://roboticsbackend.com/oop-with-ros-in-python/
 class LoadZED:  # loading ZED ROS
-    def __init__(self, sources='streams.txt', img_size=640):
+    def __init__(self,
+                 sources='streams.txt',
+                 model=None,
+                 names=None,
+                 colors=None,
+                 half=None,
+                 device=None,
+                 augment=None,
+                 webcam=None,
+                 out=None,
+                 conf_thres=None,
+                 iou_thres=None,
+                 classes=None,
+                 agnostic_nms=None,
+                 classify=None,
+                 img_size=640):
+
         self.mode = 'images'
         self.img_size = img_size
+        self.names = names
+        self.model = model
+        self.colors = colors
+        self.half = half
+        self.device = device
+        self.augment = augment
+        self.webcam = webcam
+        self.out = out
+        self.conf_thres = conf_thres
+        self.iou_thres = iou_thres
+        self.classes = classes
+        self.agnostic_nms = agnostic_nms
+        self.classify = classify
+        self.view_img = True
 
         self.pub = rospy.Publisher('/objects', String, queue_size=10)
+        print("1")
         self.sub = rospy.Subscriber('/zed2i/zed_node/stereo/image_rect_color', Image, self.callback_image)
+        print("2")
         self.ct = 0
         self.index = 0 # frame will always be 0 since we're only looking from one source
 
@@ -329,90 +368,89 @@ class LoadZED:  # loading ZED ROS
         n = len(sources)
         self.imgs = [None] * n
         self.sources = sources
-        # for i, s in enumerate(sources):
-        #     # Start the thread to read frames from the video stream
-        #     print('%g/%g: %s... ' % (i + 1, n, s), end='')
-        #     # cap = cv2.VideoCapture(eval(s) if s.isnumeric() else s)
-        #     # assert cap.isOpened(), 'Failed to open %s' % s
-        #     cap = bridge.imgmsg_to_cv2(msg, "bgr8")
-        #     cap = np.array(frame, dtype=np.uint8)
-        #     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        #     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        #     fps = cap.get(cv2.CAP_PROP_FPS) % 100
-        #     grabbed, self.imgs[i] = cap.read()  # guarantee first frame
-        #     if grabbed:
-        #         # thread = Thread(target=self.update, args=([i, cap]), daemon=True)
-        #         # threadList.append(thread)
-        #         # threadID = len(threadList) - 1
-        #         print(' success (%gx%g at %.2f FPS).' % (w, h, fps))
-        #         # threadList[threadID].start()
-        # print('')  # newline
-
-        # check for common shapes
-        # s = np.stack([letterbox(x, new_shape=self.img_size)[0].shape for x in self.imgs], 0)  # inference shapes
-        # self.rect = np.unique(s, axis=0).shape[0] == 1  # rect inference if all shapes equal
-        # if not self.rect:
-        #     print('WARNING: Different stream shapes detected. For optimal performance supply similarly-shaped streams.')
+        
+        ##### from node.py
+        # Run inference
+        self.t0 = time.time()
+        img = torch.zeros((1, 3, self.img_size, self.img_size), device=device)  # init img
+        _ = model(img.half() if self.half else img) if self.device.type != 'cpu' else None  # run once
 
     # similar to the update function
     def callback_image(self, msg):
-        print(msg.header)
-        if self.first_frame:
-            frame = bridge.imgmsg_to_cv2(msg, "bgr8")
-            frame = np.array(frame, dtype=np.uint8)
-            self.imgs[self.index] = frame
-
-            s = np.stack([letterbox(x, new_shape=self.img_size)[0].shape for x in self.imgs], 0)  # inference shapes
-            self.rect = np.unique(s, axis=0).shape[0] == 1  # rect inference if all shapes equal
-            if not self.rect:
-                print('WARNING: Different stream shapes detected. For optimal performance supply similarly-shaped streams.')
-                self.first_frame = False
-
-        self.ct += 1
-        if self.ct == 4:
-            frame = bridge.imgmsg_to_cv2(msg, "bgr8")
-            frame = np.array(frame, dtype=np.uint8)
-            self.imgs[self.index] = frame
-            self.ct = 0
-
-    # def update(self, index, cap):
-    #     # Read next stream frame in a daemon thread
-    #     n = 0
-    #     while cap.isOpened():
-    #         n += 1
-    #         # _, self.imgs[index] = cap.read()
-    #         cap.grab()
-    #         if n == 4:  # read every 4th frame
-    #             _, self.imgs[index] = cap.retrieve()
-    #             n = 0
-    #         time.sleep(0.01)  # wait time
-
-    def __iter__(self):
-        self.count = -1
-        return self
-
-    def __next__(self):
-        print(self.count)
-        self.count += 1
-        img0 = self.imgs.copy()
-        if cv2.waitKey(1) == ord('q'):  # q to quit
-            cv2.destroyAllWindows()
-            raise StopIteration
-
-        # Letterbox
-        img = [letterbox(x, new_shape=self.img_size, auto=self.rect)[0] for x in img0]
-
-        # Stack
+        imgs = [None] * 1
+        imgs[0] = bridge.imgmsg_to_cv2(msg, 'bgr8')
+        imgs[0] = np.array(imgs[0], dtype=np.uint8)
+        rect = True
+        img0 = imgs.copy()
+        #print(img0) 
+        # letterbox
+        img = [letterbox(x, new_shape=self.img_size, auto=rect)[0] for x in img0]
+        #print(img)
+        # stack
         img = np.stack(img, 0)
-
-        # Convert
+        #convert
         img = img[:, :, :, ::-1].transpose(0, 3, 1, 2)  # BGR to RGB, to bsx3x416x416
         img = np.ascontiguousarray(img)
+        
+        im0s = img0.copy()
 
-        return self.sources, img, img0, None
+        img = torch.from_numpy(img).to(self.device)
+        img = img.half() if self.half else img.float()  # uint8 to fp16/32
+        img /= 255.0  # 0 - 255 to 0.0 - 1.0
+        if img.ndimension() == 3:
+            img = img.unsqueeze(0)
 
-    def __len__(self):
-        return 0  # 1E12 frames = 32 streams at 30 FPS for 30 years
+        # Inference
+        t1 = time_synchronized()
+        pred = self.model(img, augment=self.augment)[0]
+
+        # Apply NMS
+        pred = non_max_suppression(pred, self.conf_thres, self.iou_thres, classes=self.classes, agnostic=self.agnostic_nms)
+        t2 = time_synchronized()
+
+        # # Apply Classifier
+        # if self.classify:
+        #     pred = apply_classifier(pred, self.modelc, img, im0s)
+
+        # Process detections
+        for i, det in enumerate(pred):  # detections per image
+            if self.webcam:  # batch_size >= 1
+                p, s, im0 = 'zed', '%g: ' % i, im0s[i].copy()
+            else:
+                p, s, im0 = 'zed', '', im0s
+
+            save_path = str(Path(self.out) / Path(p).name)
+            #txt_path = str(Path(out) / Path(p).stem) + ('_%g' % dataset.frame if dataset.mode == 'video' else '')
+            s += '%gx%g ' % img.shape[2:]  # print string
+            gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
+            if det is not None and len(det):
+                # Rescale boxes from img_size to im0 size
+                det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
+
+                # Print results
+                # for c in det[:, -1].unique():
+                #     n = (det[:, -1] == c).sum()  # detections per class
+                #     s += '%g %ss, ' % (n, names[int(c)])  # add to string
+
+                # Write results
+                for *xyxy, conf, cls in det:
+                    # if save_txt:  # Write to file
+                    #     xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+                    #     with open(txt_path + '.txt', 'a') as f:
+                    #         f.write(('%g ' * 5 + '\n') % (cls, *xywh))  # label format
+
+                    if self.view_img:  # Add bbox to image
+                        label = '%s %.2f' % (self.names[int(cls)], conf)
+                        plot_one_box(xyxy, im0, label=label, color=self.colors[int(cls)], line_thickness=3)
+
+            # Print time (inference + NMS)
+            print('%sDone. (%.3fs)' % (s, t2 - t1))
+
+            # Stream results
+            if self.view_img:
+                cv2.imshow(p, im0)
+                if cv2.waitKey(1) == ord('q'):  # q to quit
+                    raise StopIteration
 
 
 class LoadStreams:  # multiple IP or RTSP cameras

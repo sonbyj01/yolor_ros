@@ -62,105 +62,121 @@ def detect(save_img=False):
         modelc.load_state_dict(torch.load('weights/resnet101.pt', map_location=device)['model'])  # load weights
         modelc.to(device).eval()
 
+    # Get names and colors
+    names = load_classes(names)
+    colors = [[random.randint(0, 255) for _ in range(3)] for _ in range(len(names))]
+
     # Set Dataloader
     vid_path, vid_writer = None, None
     if webcam:
         view_img = True
         cudnn.benchmark = True  # set True to speed up constant image size inference
         rospy.init_node('yolor', anonymous=True)
-        dataset = LoadZED(source, img_size=imgsz)
+        dataset = LoadZED(source, 
+                          model=model,
+                          names=names,
+                          colors=colors,
+                          half=half,
+                          device=device,
+                          augment=opt.augment,
+                          webcam=webcam,
+                          out=out,
+                          conf_thres=opt.conf_thres,
+                          iou_thres=opt.iou_thres,
+                          classes=opt.classes,
+                          agnostic_nms=opt.agnostic_nms,
+                          classify=classify,
+                          img_size=imgsz)
         rospy.spin()
     else:
         save_img = True
         dataset = LoadImages(source, img_size=imgsz, auto_size=64)
 
-    # Get names and colors
-    names = load_classes(names)
-    colors = [[random.randint(0, 255) for _ in range(3)] for _ in range(len(names))]
 
-    # Run inference
-    t0 = time.time()
-    img = torch.zeros((1, 3, imgsz, imgsz), device=device)  # init img
-    _ = model(img.half() if half else img) if device.type != 'cpu' else None  # run once
+
+    # # Run inference
+    # t0 = time.time()
+    # img = torch.zeros((1, 3, imgsz, imgsz), device=device)  # init img
+    # _ = model(img.half() if half else img) if device.type != 'cpu' else None  # run once
     
-    ### === ####
-    for path, img, im0s, vid_cap in dataset:
-        # imgs = [None] * 1
-        # imgs[0] = bridge.imgmsg_to_cv2(msg, 'bgr8')
-        # imgs[0] = np.array(imgs[0], dtype=np.uint8)
-        # rect = True
-        # img0 = imgs.copy()
-        # #print(img0) 
-        # # letterbox
-        # img = [letterbox(x, new_shape=imgsz, auto=rect)[0] for x in img0]
-        # #print(img)
-        # # stack
-        # img = np.stack(img, 0)
-        # #convert
-        # img = img[:, :, :, ::-1].transpose(0, 3, 1, 2)  # BGR to RGB, to bsx3x416x416
-        # img = np.ascontiguousarray(img)
+    # ### === ####
+    # for path, img, im0s, vid_cap in dataset:
+    #     imgs = [None] * 1
+    #     imgs[0] = bridge.imgmsg_to_cv2(msg, 'bgr8')
+    #     imgs[0] = np.array(imgs[0], dtype=np.uint8)
+    #     rect = True
+    #     img0 = imgs.copy()
+    #     #print(img0) 
+    #     # letterbox
+    #     img = [letterbox(x, new_shape=imgsz, auto=rect)[0] for x in img0]
+    #     #print(img)
+    #     # stack
+    #     img = np.stack(img, 0)
+    #     #convert
+    #     img = img[:, :, :, ::-1].transpose(0, 3, 1, 2)  # BGR to RGB, to bsx3x416x416
+    #     img = np.ascontiguousarray(img)
         
-        # im0s = img0.copy()
+    #     im0s = img0.copy()
 
-        img = torch.from_numpy(img).to(device)
-        img = img.half() if half else img.float()  # uint8 to fp16/32
-        img /= 255.0  # 0 - 255 to 0.0 - 1.0
-        if img.ndimension() == 3:
-            img = img.unsqueeze(0)
+    #     img = torch.from_numpy(img).to(device)
+    #     img = img.half() if half else img.float()  # uint8 to fp16/32
+    #     img /= 255.0  # 0 - 255 to 0.0 - 1.0
+    #     if img.ndimension() == 3:
+    #         img = img.unsqueeze(0)
 
-        # Inference
-        t1 = time_synchronized()
-        pred = model(img, augment=opt.augment)[0]
+    #     # Inference
+    #     t1 = time_synchronized()
+    #     pred = model(img, augment=opt.augment)[0]
 
-        # Apply NMS
-        pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
-        t2 = time_synchronized()
+    #     # Apply NMS
+    #     pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
+    #     t2 = time_synchronized()
 
-        # Apply Classifier
-        if classify:
-            pred = apply_classifier(pred, modelc, img, im0s)
+    #     # Apply Classifier
+    #     if classify:
+    #         pred = apply_classifier(pred, modelc, img, im0s)
 
-        # Process detections
-        for i, det in enumerate(pred):  # detections per image
-            if webcam:  # batch_size >= 1
-                p, s, im0 = 'zed', '%g: ' % i, im0s[i].copy()
-            else:
-                p, s, im0 = 'zed', '', im0s
+    #     # Process detections
+    #     for i, det in enumerate(pred):  # detections per image
+    #         if webcam:  # batch_size >= 1
+    #             p, s, im0 = 'zed', '%g: ' % i, im0s[i].copy()
+    #         else:
+    #             p, s, im0 = 'zed', '', im0s
 
-            save_path = str(Path(out) / Path(p).name)
-            #txt_path = str(Path(out) / Path(p).stem) + ('_%g' % dataset.frame if dataset.mode == 'video' else '')
-            s += '%gx%g ' % img.shape[2:]  # print string
-            gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
-            if det is not None and len(det):
-                # Rescale boxes from img_size to im0 size
-                det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
+    #         save_path = str(Path(out) / Path(p).name)
+    #         #txt_path = str(Path(out) / Path(p).stem) + ('_%g' % dataset.frame if dataset.mode == 'video' else '')
+    #         s += '%gx%g ' % img.shape[2:]  # print string
+    #         gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
+    #         if det is not None and len(det):
+    #             # Rescale boxes from img_size to im0 size
+    #             det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
 
-                # Print results
-                # for c in det[:, -1].unique():
-                #     n = (det[:, -1] == c).sum()  # detections per class
-                #     s += '%g %ss, ' % (n, names[int(c)])  # add to string
+    #             # Print results
+    #             # for c in det[:, -1].unique():
+    #             #     n = (det[:, -1] == c).sum()  # detections per class
+    #             #     s += '%g %ss, ' % (n, names[int(c)])  # add to string
 
-                # Write results
-                for *xyxy, conf, cls in det:
-                    # if save_txt:  # Write to file
-                    #     xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                    #     with open(txt_path + '.txt', 'a') as f:
-                    #         f.write(('%g ' * 5 + '\n') % (cls, *xywh))  # label format
+    #             # Write results
+    #             for *xyxy, conf, cls in det:
+    #                 # if save_txt:  # Write to file
+    #                 #     xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+    #                 #     with open(txt_path + '.txt', 'a') as f:
+    #                 #         f.write(('%g ' * 5 + '\n') % (cls, *xywh))  # label format
 
-                    if save_img or view_img:  # Add bbox to image
-                        label = '%s %.2f' % (names[int(cls)], conf)
-                        plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=3)
+    #                 if save_img or view_img:  # Add bbox to image
+    #                     label = '%s %.2f' % (names[int(cls)], conf)
+    #                     plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=3)
 
-            # Print time (inference + NMS)
-            print('%sDone. (%.3fs)' % (s, t2 - t1))
+    #         # Print time (inference + NMS)
+    #         print('%sDone. (%.3fs)' % (s, t2 - t1))
 
-            # Stream results
-            if view_img:
-                cv2.imshow(p, im0)
-                if cv2.waitKey(1) == ord('q'):  # q to quit
-                    raise StopIteration
+    #         # Stream results
+    #         if view_img:
+    #             cv2.imshow(p, im0)
+    #             if cv2.waitKey(1) == ord('q'):  # q to quit
+    #                 raise StopIteration
 
-    print('Done. (%.3fs)' % (time.time() - t0))
+    print('Done. (%.3fs)' % (time.time()))
 
 def check_output(msg):
     print('begin')
