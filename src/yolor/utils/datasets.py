@@ -28,6 +28,25 @@ from utils.torch_utils import torch_distributed_zero_first
 
 from cv_bridge import CvBridge
 
+import atexit
+
+# exit params
+# https://github.com/tobybreckon/zed-opencv-native-python/blob/master/camera_stream.py
+exitingNow = False
+threadList = []
+
+def closeDownAllThreadsCleanly():
+    global exitingNow
+    global threadList
+
+    exitingNow = True
+
+    for thread in threadList:
+        thread.join()
+    print("killed all daemon processes cleanly...")
+
+atexit.register(closeDownAllThreadsCleanly)
+
 # Parameters
 help_url = 'https://github.com/ultralytics/yolov5/wiki/Train-Custom-Data'
 img_formats = ['bmp', 'jpg', 'jpeg', 'png', 'tif', 'tiff', 'dng']  # acceptable image suffixes
@@ -301,15 +320,18 @@ class LoadZED:  # loading ZED ROS
             # Start the thread to read frames from the video stream
             print('%g/%g: %s... ' % (i + 1, n, s), end='')
             cap = CvBridge()
-            #cap = cv2.VideoCapture(eval(s) if s.isnumeric() else s)
-            #assert cap.isOpened(), 'Failed to open %s' % s
+            cap = cv2.VideoCapture(eval(s) if s.isnumeric() else s)
+            assert cap.isOpened(), 'Failed to open %s' % s
             w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             fps = cap.get(cv2.CAP_PROP_FPS) % 100
-            _, self.imgs[i] = cap.read()  # guarantee first frame
-            thread = Thread(target=self.update, args=([i, cap]), daemon=True)
-            print(' success (%gx%g at %.2f FPS).' % (w, h, fps))
-            thread.start()
+            grabbed, self.imgs[i] = cap.read()  # guarantee first frame
+            if grabbed:
+                thread = Thread(target=self.update, args=([i, cap]), daemon=True)
+                threadList.append(thread)
+                threadID = len(threadList) - 1
+                print(' success (%gx%g at %.2f FPS).' % (w, h, fps))
+                threadList[threadID].start()
         print('')  # newline
 
         # check for common shapes
@@ -379,10 +401,15 @@ class LoadStreams:  # multiple IP or RTSP cameras
             w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             fps = cap.get(cv2.CAP_PROP_FPS) % 100
-            _, self.imgs[i] = cap.read()  # guarantee first frame
-            thread = Thread(target=self.update, args=([i, cap]), daemon=True)
-            print(' success (%gx%g at %.2f FPS).' % (w, h, fps))
-            thread.start()
+            grabbed, self.imgs[i] = cap.read()  # guarantee first frame
+            if grabbed:
+                thread = Thread(target=self.update, args=([i, cap]), daemon=True)
+                threadList.append(thread)
+                threadID = len(threadList) - 1
+                print(' success (%gx%g at %.2f FPS).' % (w, h, fps))
+                threadList[threadID].start()
+            else: 
+                print('unable to grab frame')
         print('')  # newline
 
         # check for common shapes
