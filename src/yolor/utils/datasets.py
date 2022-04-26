@@ -30,6 +30,10 @@ from cv_bridge import CvBridge
 
 import atexit
 
+import rospy
+from sensor_msgs.msg import Image
+from std_msgs.msg import String
+
 # exit params
 # https://github.com/tobybreckon/zed-opencv-native-python/blob/master/camera_stream.py
 exitingNow = False
@@ -302,61 +306,93 @@ class LoadWebcam:  # for inference
         return 0
 
 
+bridge = CvBridge()
+# https://roboticsbackend.com/oop-with-ros-in-python/
 class LoadZED:  # loading ZED ROS
     def __init__(self, sources='streams.txt', img_size=640):
         self.mode = 'images'
         self.img_size = img_size
 
-        if os.path.isfile(sources):
-            with open(sources, 'r') as f:
-                sources = [x.strip() for x in f.read().splitlines() if len(x.strip())]
-        else:
-            sources = [sources]
+        self.pub = rospy.Publisher('/objects', String, queue_size=10)
+        self.sub = rospy.Subscriber('/zed2i/zed_node/stereo/image_rect_color', Image, self.callback_image)
+        self.ct = 0
+        self.index = 0 # frame will always be 0 since we're only looking from one source
+
+        self.first_frame = True
+
+        # if os.path.isfile(sources):
+        #     with open(sources, 'r') as f:
+        #         sources = [x.strip() for x in f.read().splitlines() if len(x.strip())]
+        # else:
+        #     sources = [sources]
 
         n = len(sources)
         self.imgs = [None] * n
         self.sources = sources
-        for i, s in enumerate(sources):
-            # Start the thread to read frames from the video stream
-            print('%g/%g: %s... ' % (i + 1, n, s), end='')
-            cap = CvBridge()
-            cap = cv2.VideoCapture(eval(s) if s.isnumeric() else s)
-            assert cap.isOpened(), 'Failed to open %s' % s
-            w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            fps = cap.get(cv2.CAP_PROP_FPS) % 100
-            grabbed, self.imgs[i] = cap.read()  # guarantee first frame
-            if grabbed:
-                thread = Thread(target=self.update, args=([i, cap]), daemon=True)
-                threadList.append(thread)
-                threadID = len(threadList) - 1
-                print(' success (%gx%g at %.2f FPS).' % (w, h, fps))
-                threadList[threadID].start()
-        print('')  # newline
+        # for i, s in enumerate(sources):
+        #     # Start the thread to read frames from the video stream
+        #     print('%g/%g: %s... ' % (i + 1, n, s), end='')
+        #     # cap = cv2.VideoCapture(eval(s) if s.isnumeric() else s)
+        #     # assert cap.isOpened(), 'Failed to open %s' % s
+        #     cap = bridge.imgmsg_to_cv2(msg, "bgr8")
+        #     cap = np.array(frame, dtype=np.uint8)
+        #     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        #     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        #     fps = cap.get(cv2.CAP_PROP_FPS) % 100
+        #     grabbed, self.imgs[i] = cap.read()  # guarantee first frame
+        #     if grabbed:
+        #         # thread = Thread(target=self.update, args=([i, cap]), daemon=True)
+        #         # threadList.append(thread)
+        #         # threadID = len(threadList) - 1
+        #         print(' success (%gx%g at %.2f FPS).' % (w, h, fps))
+        #         # threadList[threadID].start()
+        # print('')  # newline
 
         # check for common shapes
-        s = np.stack([letterbox(x, new_shape=self.img_size)[0].shape for x in self.imgs], 0)  # inference shapes
-        self.rect = np.unique(s, axis=0).shape[0] == 1  # rect inference if all shapes equal
-        if not self.rect:
-            print('WARNING: Different stream shapes detected. For optimal performance supply similarly-shaped streams.')
+        # s = np.stack([letterbox(x, new_shape=self.img_size)[0].shape for x in self.imgs], 0)  # inference shapes
+        # self.rect = np.unique(s, axis=0).shape[0] == 1  # rect inference if all shapes equal
+        # if not self.rect:
+        #     print('WARNING: Different stream shapes detected. For optimal performance supply similarly-shaped streams.')
 
-    def update(self, index, cap):
-        # Read next stream frame in a daemon thread
-        n = 0
-        while cap.isOpened():
-            n += 1
-            # _, self.imgs[index] = cap.read()
-            cap.grab()
-            if n == 4:  # read every 4th frame
-                _, self.imgs[index] = cap.retrieve()
-                n = 0
-            time.sleep(0.01)  # wait time
+    # similar to the update function
+    def callback_image(self, msg):
+        print(msg.header)
+        if self.first_frame:
+            frame = bridge.imgmsg_to_cv2(msg, "bgr8")
+            frame = np.array(frame, dtype=np.uint8)
+            self.imgs[self.index] = frame
+
+            s = np.stack([letterbox(x, new_shape=self.img_size)[0].shape for x in self.imgs], 0)  # inference shapes
+            self.rect = np.unique(s, axis=0).shape[0] == 1  # rect inference if all shapes equal
+            if not self.rect:
+                print('WARNING: Different stream shapes detected. For optimal performance supply similarly-shaped streams.')
+                self.first_frame = False
+
+        self.ct += 1
+        if self.ct == 4:
+            frame = bridge.imgmsg_to_cv2(msg, "bgr8")
+            frame = np.array(frame, dtype=np.uint8)
+            self.imgs[self.index] = frame
+            self.ct = 0
+
+    # def update(self, index, cap):
+    #     # Read next stream frame in a daemon thread
+    #     n = 0
+    #     while cap.isOpened():
+    #         n += 1
+    #         # _, self.imgs[index] = cap.read()
+    #         cap.grab()
+    #         if n == 4:  # read every 4th frame
+    #             _, self.imgs[index] = cap.retrieve()
+    #             n = 0
+    #         time.sleep(0.01)  # wait time
 
     def __iter__(self):
         self.count = -1
         return self
 
     def __next__(self):
+        print(self.count)
         self.count += 1
         img0 = self.imgs.copy()
         if cv2.waitKey(1) == ord('q'):  # q to quit
