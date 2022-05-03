@@ -426,11 +426,12 @@ class LoadZED:  # loading ZED ROS
             if det is not None and len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
+                # print(det[:, -1].unique())
 
                 # Print results
                 # for c in det[:, -1].unique():
                 #     n = (det[:, -1] == c).sum()  # detections per class
-                #     s += '%g %ss, ' % (n, names[int(c)])  # add to string
+                #     s += '%g %ss, ' % (n, self.names[int(c)])  # add to string
 
                 # Write results
                 for *xyxy, conf, cls in det:
