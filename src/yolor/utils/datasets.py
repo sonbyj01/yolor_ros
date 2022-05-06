@@ -1,5 +1,6 @@
 # Dataset utils and dataloaders
 
+from email import message
 import glob
 import math
 import os
@@ -29,6 +30,7 @@ from utils.torch_utils import torch_distributed_zero_first
 from cv_bridge import CvBridge
 
 import atexit
+import message_filters
 
 import rospy
 from sensor_msgs.msg import Image
@@ -350,10 +352,16 @@ class LoadZED:  # loading ZED ROS
         self.classify = classify
         self.view_img = True
 
-        self.pub = rospy.Publisher('/objects', String, queue_size=10)
-        print("1")
+        # self.pub = rospy.Publisher('/objects', String, queue_size=10)
+
         self.sub = rospy.Subscriber('/zed2i/zed_node/stereo/image_rect_color', Image, self.callback_image)
-        print("2")
+
+        # image_sub = message_filters.Subscriber('/zed2i/zed_node/stereo/image_rect_color', Image)
+        # depth_sub = message_filters.Subscriber('/zed2i/zed_node/depth/depth_registered', Image)
+
+        # time_sync = message_filters.TimeSynchronizer([image_sub, depth_sub], 10)
+        # time_sync.registerCallback(self.callback_image)
+
         self.ct = 0
         self.index = 0 # frame will always be 0 since we're only looking from one source
 
@@ -376,9 +384,9 @@ class LoadZED:  # loading ZED ROS
         _ = model(img.half() if self.half else img) if self.device.type != 'cpu' else None  # run once
 
     # similar to the update function
-    def callback_image(self, msg):
+    def callback_image(self, image):
         imgs = [None] * 1
-        imgs[0] = bridge.imgmsg_to_cv2(msg, 'bgr8')
+        imgs[0] = bridge.imgmsg_to_cv2(image, 'bgr8')
         imgs[0] = np.array(imgs[0], dtype=np.uint8)
         rect = True
         img0 = imgs.copy()

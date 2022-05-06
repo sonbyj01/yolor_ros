@@ -48,6 +48,7 @@ def detect(save_img=False):
 
     # Load model
     model = Darknet(cfg, imgsz).cuda()
+    weights = [weights]
     model.load_state_dict(torch.load(weights[0], map_location=device)['model'])
     #model = attempt_load(weights, map_location=device)  # load FP32 model
     #imgsz = check_img_size(imgsz, s=model.stride.max())  # check img_size
@@ -189,7 +190,7 @@ def check_output(msg):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', nargs='+', type=str, default='yolor_p6.pt', help='model.pt path(s)')
+    parser.add_argument('--weights', nargs='+', type=str, default='scripts/yolor_p6.pt', help='model.pt path(s)')
     parser.add_argument('--source', type=str, default='inference/images', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--output', type=str, default='inference/output', help='output folder')  # output folder
     parser.add_argument('--img-size', type=int, default=1280, help='inference size (pixels)')

@@ -32,6 +32,8 @@ def detect(save_img=False):
         opt.output, opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, opt.cfg, opt.names
     webcam = source == '0' or source.startswith('rtsp') or source.startswith('http') or source.endswith('.txt')
 
+    print(weights)
+
     # Initialize
     device = select_device(opt.device)
     if os.path.exists(out):
